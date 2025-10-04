@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rastreador de Asteroides - Simulador de Impacto</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="styles.css"> 
+</head>
+<body>
+    <div class="container">
+        <div class="map-section">
+            <h1>Rastreador de Asteroides - Simulador de Impacto Preciso</h1>
+            <div id="worldMap"></div>
+        </div>
+        <div class="sidebar">
+            <h2>Simulador de Impacto</h2>
+            <div class="simulator-box">
+                <div id="selectedAsteroidInfo" style="margin-bottom: 15px; font-size: 14px; color: #fbbf24; display: none;">
+                    <strong>Asteroide Selecionado:</strong> <span id="currentAsteroidName">Nenhum</span>
+                </div>
+                
+                <label style="display: block; margin-bottom: 5px; font-size: 14px; color: #9ca3af;">
+                    Local de Impacto:
+                </label>
+                <div style="margin-bottom: 10px; font-size: 13px; color: #cbd5e0;">
+                    <div style="margin-top: 5px;">
+                        <label style="display: inline-block; margin-right: 15px;">
+                            <input type="radio" name="selectionMode" value="click" checked> Clique no mapa
+                        </label>
+                        <label style="display: inline-block;">
+                            <input type="radio" name="selectionMode" value="coords"> Coordenadas
+                        </label>
+                    </div>
+                </div>
+                <div id="coordsInput" style="display: none; margin-bottom: 10px;">
+                    <input type="number" id="latInput" placeholder="Lat (-90 a 90)" step="0.01" min="-90" max="90" style="width: 48%; padding: 6px; margin-right: 4%; background: rgba(30, 35, 55, 0.8); border: 1px solid #4a5568; border-radius: 5px; color: #fff; font-size: 13px;">
+                    <input type="number" id="lonInput" placeholder="Lon (-180 a 180)" step="0.01" min="-180" max="180" style="width: 48%; padding: 6px; background: rgba(30, 35, 55, 0.8); border: 1px solid #4a5568; border-radius: 5px; color: #fff; font-size: 13px;">
+                </div>
+                <button id="simulateBtn" class="simulate-btn" disabled>SIMULAR IMPACTO</button>
+                <div style="margin-top: 10px; padding: 8px; background: rgba(59, 130, 246, 0.1); border: 1px solid #3b82f6; border-radius: 5px; font-size: 11px; color: #93c5fd;">
+                    Usando APIs: OpenStreetMap (geocoding), GeoNames (população), Leaflet (mapa)
+                </div>
+                <div id="simulationResult" style="margin-top: 15px; display: none;"></div>
+            </div>
+
+            <h2>Opções de Mitigação</h2>
+            <div class="simulator-box">
+                <div id="mitigationOptions">
+                    <p style="font-size: 14px; color: #9ca3af;">
+                        <span id="mitigationMsg">Selecione um asteroide e simule um impacto para ver as opções.</span>
+                    </p>
+                    <div id="mitigationDetails" style="margin-top: 10px; display: none;">
+                        <div class="stat-item">
+                            <span class="stat-label">Desvio (Foguete de Impulso):</span>
+                            <span class="stat-value" id="mitigation-deflection">N/A</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Destruição (Nuclear):</span>
+                            <span class="stat-value" id="mitigation-destruction">N/A</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Evacuação (Raio):</span>
+                            <span class="stat-value" id="mitigation-evac">N/A</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <h2>Estatísticas</h2>
+            <div class="stats">
+                <div class="stat-item">
+                    <span class="stat-label">Total de Asteroides:</span>
+                    <span class="stat-value" id="totalAsteroids">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Alto Risco:</span>
+                    <span class="stat-value" id="highRisk">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Médio Risco:</span>
+                    <span class="stat-value" id="mediumRisk">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Baixo Risco:</span>
+                    <span class="stat-value" id="lowRisk">0</span>
+                </div>
+            </div>
+
+            <h2>Lista de Asteroides (Filtros)</h2>
+            <div class="simulator-box filter-box">
+                <input type="text" id="filterName" placeholder="Filtrar por nome" class="filter-input">
+                <select id="filterRisk" class="filter-input">
+                    <option value="">Risco (Todos)</option>
+                    <option value="high">Alto</option>
+                    <option value="medium">Médio</option>
+                    <option value="low">Baixo</option>
+                </select>
+                <input type="number" id="filterDistance" placeholder="Distância Máx. (mil km)" class="filter-input" min="0">
+                <input type="number" id="filterDiameter" placeholder="Diâmetro Mín. (km)" class="filter-input" step="0.01" min="0">
+            </div>
+
+            <div id="asteroidList">
+                <div class="loading">Carregando dados...</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="loadingOverlay" class="loading-overlay" style="display: none;">
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+            <div style="color: #fbbf24; font-size: 16px;" id="loadingMessage"></div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="script.js"></script> 
+</body>
+</html>
