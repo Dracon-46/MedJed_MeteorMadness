@@ -266,7 +266,7 @@ class AsteroidCalculator {
                 }
 
                 // Limite global como teto absoluto.
-                totalEstimatedCasualties = Math.min(totalEstimatedCasualties, 100000000); 
+                totalEstimatedCasualties = Math.min(totalEstimatedCasualties, 10000000); 
                 
             } catch (error) {
                 console.warn(`Simulação: Falha ao obter dados WorldPop: ${error.message}`);
