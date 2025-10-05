@@ -1,3 +1,5 @@
+//The code has the help of artificial intelligence in its development, but it was managed, developed and tested by humans.
+
 // NASA API Key for the Near-Earth Object Web Service (NeoWs)
 const NASA_API_KEY = "PASTE_YOUR_KEY_HERE"; // Use "DEMO_KEY" for testing
 // WorldPop dataset for population querying (WorldPop Global Project Population)
