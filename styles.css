@@ -1,44 +1,52 @@
+/* General reset for all elements */
 * { 
     margin: 0; 
     padding: 0; 
     box-sizing: border-box; 
 }
 
+/* Base styling for the body */
 body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    /* Dark space-like gradient background */
     background: linear-gradient(135deg, #0a0e27 0%, #1a1f3a 100%);
-    color: #fff;
-    overflow-x: hidden;
+    color: #fff; /* White text color */
+    overflow-x: hidden; /* Prevents horizontal scroll */
 }
 
+/* Main content container, uses flex for layout */
 .container { 
     display: flex; 
-    height: 100vh; 
+    height: 100vh; /* Full viewport height */
 }
 
+/* Section for the map */
 .map-section { 
-    flex: 2; 
+    flex: 2; /* Takes 2/3 of the space */
     padding: 20px; 
     display: flex; 
     flex-direction: column; 
 }
 
+/* Sidebar for controls and lists */
 .sidebar {
-    flex: 1;
+    flex: 1; /* Takes 1/3 of the space */
     background: rgba(20, 25, 45, 0.9);
     padding: 20px;
-    overflow-y: auto;
+    overflow-y: auto; /* Scrollable list */
     border-left: 2px solid #4a5568;
-    max-width: 450px;
+    max-width: 450px; /* Max width for sidebar */
 }
 
+/* Main title styling */
 h1 { 
     font-size: 24px; 
     margin-bottom: 15px; 
-    color: #fbbf24; 
+    color: #fbbf24; /* Yellow accent color */
     text-align: center; 
 }
 
+/* Sub-heading styling */
 h2 {
     font-size: 18px;
     margin-bottom: 15px;
@@ -47,15 +55,17 @@ h2 {
     padding-bottom: 10px;
 }
 
+/* Map container styling */
 #worldMap {
     width: 100%;
     flex: 1;
     border: 2px solid #4a5568;
     border-radius: 8px;
     overflow: hidden;
-    z-index: 1;
+    z-index: 1; /* Ensures map is above most elements but below popups */
 }
 
+/* Box for simulator controls */
 .simulator-box {
     background: rgba(30, 35, 55, 0.8);
     border: 1px solid #4a5568;
@@ -64,13 +74,14 @@ h2 {
     margin-bottom: 20px;
 }
 
-/* Filtros */
+/* Filters layout */
 .filter-box {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 10px;
 }
 
+/* Input/Select styling within filters */
 .filter-input {
     padding: 8px;
     background: rgba(30, 35, 55, 0.8);
@@ -80,10 +91,12 @@ h2 {
     font-size: 14px;
 }
 
+/* Simulation button styling */
 .simulate-btn {
     width: 100%;
     padding: 10px;
-    background: linear-gradient(135deg, #ef4444, #dc2626);
+    /* Red gradient for the button */
+    background: linear-gradient(135deg, #ef4444, #dc2626); 
     border: none;
     border-radius: 5px;
     color: #fff;
@@ -93,18 +106,21 @@ h2 {
     transition: all 0.3s;
 }
 
+/* Hover effect for the simulation button */
 .simulate-btn:hover {
     background: linear-gradient(135deg, #dc2626, #b91c1c);
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
 }
 
+/* Disabled state for the simulation button */
 .simulate-btn:disabled {
     background: #4a5568;
     cursor: not-allowed;
     opacity: 0.5;
 }
 
+/* Box for statistics */
 .stats {
     background: rgba(30, 35, 55, 0.8);
     border: 1px solid #4a5568;
@@ -113,6 +129,7 @@ h2 {
     margin-bottom: 20px;
 }
 
+/* Individual statistic line item */
 .stat-item {
     display: flex;
     justify-content: space-between;
@@ -120,15 +137,18 @@ h2 {
     font-size: 14px;
 }
 
+/* Label for the statistic */
 .stat-label { 
     color: #9ca3af; 
 }
 
+/* Value for the statistic */
 .stat-value { 
     color: #fbbf24; 
     font-weight: bold; 
 }
 
+/* Card for an asteroid in the list */
 .asteroid-card {
     background: rgba(30, 35, 55, 0.8);
     border: 1px solid #4a5568;
@@ -137,21 +157,24 @@ h2 {
     margin-bottom: 15px;
     transition: all 0.3s ease;
     cursor: pointer;
-    border-left: 5px solid transparent; /* Indicador de seleção */
+    border-left: 5px solid transparent; /* Border for selection indicator */
 }
 
+/* Hover effect for the asteroid card */
 .asteroid-card:hover {
     background: rgba(40, 45, 65, 0.9);
     border-color: #fbbf24;
     transform: translateX(5px);
 }
 
+/* Style for the currently selected asteroid card */
 .asteroid-card.selected {
     background: rgba(45, 50, 75, 1);
-    border-left-color: #fbbf24; /* Cor de destaque para o selecionado */
+    border-left-color: #fbbf24; /* Highlight color for selected */
     box-shadow: 0 0 10px rgba(251, 191, 36, 0.3);
 }
 
+/* Asteroid name styling */
 .asteroid-name { 
     font-size: 16px; 
     font-weight: bold; 
@@ -159,12 +182,14 @@ h2 {
     margin-bottom: 8px; 
 }
 
+/* General info text in the card */
 .asteroid-info { 
     font-size: 13px; 
     color: #cbd5e0; 
     margin: 5px 0; 
 }
 
+/* Risk badge styling */
 .risk-indicator {
     display: inline-block;
     padding: 4px 12px;
@@ -174,21 +199,25 @@ h2 {
     margin-top: 5px;
 }
 
+/* Color for Low Risk */
 .risk-low { 
     background: #10b981; 
     color: #fff; 
 }
 
+/* Color for Medium Risk */
 .risk-medium { 
     background: #f59e0b; 
     color: #fff; 
 }
 
+/* Color for High Risk */
 .risk-high { 
     background: #ef4444; 
     color: #fff; 
 }
 
+/* Loading message in the list */
 .loading { 
     text-align: center; 
     padding: 40px; 
@@ -196,6 +225,7 @@ h2 {
     color: #fbbf24; 
 }
 
+/* Leaflet popup customization (wrapper) */
 .leaflet-popup-content-wrapper {
     background: rgba(20, 25, 45, 0.95);
     color: #fff;
@@ -203,21 +233,25 @@ h2 {
     border-radius: 8px;
 }
 
+/* Leaflet popup content styling */
 .leaflet-popup-content { 
     margin: 15px; 
     font-size: 14px; 
     max-width: 300px; 
 }
 
+/* Leaflet popup tip color */
 .leaflet-popup-tip { 
     background: rgba(20, 25, 45, 0.95); 
 }
 
+/* Keyframe animation for the impact marker pulse */
 @keyframes pulse {
     0%, 100% { transform: scale(1); opacity: 1; }
     50% { transform: scale(1.2); opacity: 0.8; }
 }
 
+/* Full-screen overlay for loading state */
 .loading-overlay {
     position: fixed;
     top: 0;
@@ -231,6 +265,7 @@ h2 {
     z-index: 10000;
 }
 
+/* Container for the spinner and message */
 .loading-spinner {
     background: rgba(30, 35, 55, 0.95);
     padding: 30px;
@@ -239,6 +274,7 @@ h2 {
     text-align: center;
 }
 
+/* The actual spinning animation element */
 .spinner {
     border: 4px solid rgba(251, 191, 36, 0.3);
     border-top: 4px solid #fbbf24;
@@ -249,6 +285,7 @@ h2 {
     margin: 0 auto 15px;
 }
 
+/* Keyframe animation for the spinner rotation */
 @keyframes spin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
