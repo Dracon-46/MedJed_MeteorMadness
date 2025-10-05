@@ -1,9 +1,11 @@
 const NASA_API_KEY = "ldWa4kJ2AqQpyh6sMK46LzcCcuF7fSDiiIAWr5ij";
-const GEONAMES_USER = "dracon"; // Seu username do GeoNames
+const WORLDPOP_DATASET = "wpgppop"; 
+const WORLDPOP_YEAR = 2020;
 let asteroidsData = []; 
 let map, selectedAsteroid = null, simulationMarker = null, simulationZones = [];
 
-// --- Funções de API e Utilitários ---
+// O raio máximo permitido para uma única consulta (Área <= 100,000 km²)
+const WORLDPOP_MAX_RADIUS_KM = 178; 
 
 function showLoading(message) {
     document.getElementById('loadingMessage').textContent = message;
@@ -14,7 +16,6 @@ function hideLoading() {
     document.getElementById('loadingOverlay').style.display = 'none';
 }
 
-// API para detectar se é terra ou oceano + obter localização
 async function getLocationInfo(lat, lon) {
     try {
         const response = await fetch(
@@ -46,83 +47,118 @@ async function getLocationInfo(lat, lon) {
     }
 }
 
-// Obtém a população para um ponto (lat, lon) e um raio de impacto
-async function getPopulationForZone(lat, lon, radiusKm) {
-    const areaKm2 = Math.PI * radiusKm * radiusKm;
-    
-    try {
-        const locationInfo = await getLocationInfo(lat, lon);
+function createImpactPolygon(lat, lon, radiusKm, segments = 32) {
+    const coords = [];
+    const earthRadiusKm = 6371;
+    const centralAngle = radiusKm / earthRadiusKm;
+
+    for (let i = 0; i <= segments; i++) {
+        const bearing = i * (360 / segments);
         
-        if (locationInfo.type === 'ocean') {
-            return { population: 0, source: 'Oceano', nearestCity: null, density: 0 };
+        const latRad = lat * (Math.PI / 180);
+        const lonRad = lon * (Math.PI / 180);
+        const bearingRad = bearing * (Math.PI / 180);
+
+        const newLatRad = Math.asin(
+            Math.sin(latRad) * Math.cos(centralAngle) +
+            Math.cos(latRad) * Math.sin(centralAngle) * Math.cos(bearingRad)
+        );
+        const newLonRad = lonRad + Math.atan2(
+            Math.sin(bearingRad) * Math.sin(centralAngle) * Math.cos(latRad),
+            Math.cos(centralAngle) - Math.sin(latRad) * Math.sin(newLatRad)
+        );
+
+        coords.push([newLonRad * (180 / Math.PI), newLatRad * (180 / Math.PI)]);
+    }
+
+    return {
+        "type": "FeatureCollection",
+        "features": [{
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [coords] 
+            }
+        }]
+    };
+}
+
+async function pollWorldPopTask(taskId) {
+    let status = 'created';
+    let data = null;
+    const maxAttempts = 30; // 30 segundos de timeout
+    let attempt = 0;
+
+    while (status !== 'finished' && status !== 'failed' && attempt < maxAttempts) {
+        attempt++;
+        showLoading(`Monitorando Task ${taskId.substring(0, 4)}... (Tentativa ${attempt}/${maxAttempts})...`);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        try {
+            const url = `https://api.worldpop.org/v1/tasks/${taskId}`;
+            const res = await fetch(url);
+            data = await res.json();
+            status = data.status;
+
+            if (status === 'finished') {
+                if (data.data && typeof data.data.total_population === 'number') {
+                    return data.data.total_population || 0;
+                }
+                throw new Error('Resultado WorldPop finalizado, mas sem dados de população.');
+            } else if (status === 'failed') {
+                throw new Error(data.error_message || 'WorldPop task failed.');
+            }
+        } catch (error) {
+            throw new Error(`Falha na comunicação com WorldPop.`);
         }
-        
-        // GeoNames API para obter a cidade mais próxima
-        const geonamesUrl = `http://api.geonames.org/findNearbyPlaceNameJSON?lat=${lat}&lng=${lon}&radius=${radiusKm}&maxRows=1&username=${GEONAMES_USER}`;
-        
-        const response = await fetch(geonamesUrl);
-        if (response.status === 401) throw new Error('401 Unauthorized - GeoNames username not activated or incorrect.');
+    }
 
-        const data = await response.json();
-        
-        let totalPopulation = 0;
-        let nearestCity = null;
-
-        if (data.geonames && data.geonames.length > 0) {
-            const place = data.geonames[0];
-            totalPopulation = parseInt(place.population) || 0;
-            nearestCity = place.name;
-        }
-
-        const density = totalPopulation > 0 ? Math.round(totalPopulation / areaKm2) : 
-                        (totalPopulation === 0 && locationInfo.country) ? estimatePopulationByRegion(locationInfo).density : 0;
-        
-        // Se a população for 0, usa a estimativa (fallback)
-        if (totalPopulation === 0 && locationInfo.country) {
-            const fallback = estimatePopulationByRegion(locationInfo);
-            return {
-                population: Math.round(areaKm2 * fallback.density),
-                density: fallback.density,
-                source: fallback.source,
-                nearestCity: null
-            };
-        }
-
-        return {
-            population: totalPopulation,
-            density: density,
-            source: nearestCity ? `GeoNames (${nearestCity})` : 'GeoNames (Área)',
-            nearestCity: nearestCity
-        };
-        
-    } catch (e) {
-        console.warn(`GeoNames falhou (${e.message}). Usando estimativa regional.`);
-        const locationInfo = await getLocationInfo(lat, lon);
-        return estimatePopulationByRegion(locationInfo, radiusKm);
+    if (status !== 'finished') {
+        throw new Error('Tempo limite excedido ao esperar pela tarefa WorldPop.');
     }
 }
 
-// Função de fallback para estimativa
-function estimatePopulationByRegion(locationInfo, areaRadiusKm = 10) {
-    const densityMap = {
-        'Brazil': 25, 'United States': 36, 'Canada': 4, 'Russia': 9,
-        'China': 150, 'India': 460, 'Japan': 340, 'Germany': 240, 
-        'France': 120, 'United Kingdom': 280, 'Australia': 3,
-    };
-    
-    const density = densityMap[locationInfo.country] || 50; 
-    const areaKm2 = Math.PI * areaRadiusKm * areaRadiusKm; 
-    const estimatedPopulation = Math.round(areaKm2 * density);
-    
-    return { 
-        density, 
-        population: estimatedPopulation, 
-        source: `Estimativa para ${locationInfo.country || 'o local'}`,
-        nearestCity: null
-    };
+async function getWorldPopPopulation(lat, lon, radiusKm) {
+    if (radiusKm > WORLDPOP_MAX_RADIUS_KM) {
+        throw new Error(`O raio (${radiusKm.toFixed(1)} km) excede o limite WorldPop (${WORLDPOP_MAX_RADIUS_KM} km).`);
+    }
+
+    try {
+        const geojson = createImpactPolygon(lat, lon, radiusKm);
+        const geojsonString = JSON.stringify(geojson);
+
+        const createUrl = `https://api.worldpop.org/v1/services/stats?dataset=${WORLDPOP_DATASET}&year=${WORLDPOP_YEAR}&geojson=${encodeURIComponent(geojsonString)}`;
+        
+        showLoading(`Enviando polígono de impacto (Raio ${radiusKm.toFixed(0)} km) para WorldPop...`);
+        const createRes = await fetch(createUrl);
+        
+        if (!createRes.ok) {
+            throw new Error(`Falha na criação da tarefa WorldPop: Status ${createRes.status}`);
+        }
+
+        const createData = await createRes.json();
+        
+        if (createData.error || !createData.taskid) {
+            throw new Error(`Erro ao criar tarefa WorldPop: ${createData.error_message || 'Sem Task ID'}`);
+        }
+        
+        const taskId = createData.taskid;
+        const population = await pollWorldPopTask(taskId);
+
+        return {
+            population: Math.round(population),
+            source: `WorldPop (${WORLDPOP_YEAR})`
+        };
+
+    } catch (e) {
+        console.error(`Falha ao obter população WorldPop:`, e);
+        throw new Error(`Falha crítica na obtenção de dados de população: ${e.message}`);
+    } finally {
+        hideLoading();
+    }
 }
 
-// --- Classe de Cálculo ---
 
 class AsteroidCalculator {
     constructor(neo, approach) {
@@ -136,24 +172,16 @@ class AsteroidCalculator {
         const radius = (diameter * 1000) / 2; 
         
         const volume = (4/3) * Math.PI * Math.pow(radius, 3);
-        const mass = volume * 2600; // Densidade média em kg/m³
+        const mass = volume * 2600;
         
         const energyJoules = 0.5 * mass * Math.pow(velocity * 1000, 2);
         
-        return energyJoules / 4.184e15; // Retorna em Megatons
+        return energyJoules / 4.184e15;
     }
 
     calculateMitigation(energy, diameter) {
-        // Cálculo simplificado baseado em energia e diâmetro.
-
-        // Desvio (Impulso): Força de impulso necessária (em unidades de GigaNewtons)
-        // Mais difícil quanto maior e mais rápido
         const impulseForce = (diameter * energy * 0.1).toFixed(2); 
-
-        // Destruição (Nuclear): Necessidade de energia nuclear (em Equivalente de Hiroshima, 15 kt)
         const destructionYield = (diameter * energy * 0.5 / 0.015).toFixed(0); 
-
-        // Evacuação: Baseado na zona de destruição severa
         const craterRadius = 1.8 * Math.pow(diameter, 0.13) * Math.pow(energy, 0.29);
         const severeRadius = craterRadius * 5; 
         
@@ -168,64 +196,82 @@ class AsteroidCalculator {
         const energy = this.calculateImpactEnergy();
         const diameter = this.neo.estimated_diameter.kilometers.estimated_diameter_max;
         
-        // Cratera e Raio de Danos
         const craterRadius = 1.8 * Math.pow(diameter, 0.13) * Math.pow(energy, 0.29);
         
         const locationInfo = await getLocationInfo(lat, lon);
         const isOcean = locationInfo.type === 'ocean';
         
         const zones = {
-            totalDevastation: craterRadius * 2, // 100% mortalidade
-            severeDestruction: craterRadius * 5, // ~70% mortalidade
-            moderateDamage: craterRadius * 10, // ~30% mortalidade
+            totalDevastation: craterRadius * 2, 
+            severeDestruction: craterRadius * 5, 
+            moderateDamage: craterRadius * 10, 
             lightEffects: craterRadius * 20
         };
 
         let totalEstimatedCasualties = 0;
         let populationSource = 'Oceano / Sem vítimas';
-        let nearestCity = null;
+        let nearestCity = locationInfo.city;
 
         if (!isOcean) {
-            // Busca População e calcula vítimas em cada zona (do centro para fora)
-            const zoneInfo = [
-                { radius: zones.totalDevastation, mortality: 1.0, label: 'Destruição Total' },
-                { radius: zones.severeDestruction, mortality: 0.7, label: 'Destruição Severa' },
-                { radius: zones.moderateDamage, mortality: 0.3, label: 'Dano Moderado' }
-            ];
             
-            let previousRadius = 0;
-            
-            for (const zone of zoneInfo) {
-                // Raio da área de impacto (ex: 10km)
-                const areaRadius = zone.radius; 
-                
-                // Busca a população na área total do raio atual
-                const popData = await getPopulationForZone(lat, lon, areaRadius);
-                
-                // Calcula a área da zona
-                const totalAreaKm2 = Math.PI * areaRadius * areaRadius;
-                const previousAreaKm2 = Math.PI * previousRadius * previousRadius;
-                const currentZoneArea = totalAreaKm2 - previousAreaKm2;
+            const totalRadius = zones.moderateDamage; 
+            let queryRadiusKm = Math.min(totalRadius, WORLDPOP_MAX_RADIUS_KM);
+            let totalPopInZone = 0; // População real encontrada
 
-                // Estima a população *nesta* zona (população média * área da zona)
-                // Usa a densidade se a população for 0 ou se for uma estimativa
-                const density = popData.density > 0 ? popData.density : estimatePopulationByRegion(locationInfo).density;
-                const estimatedPopInZone = Math.round(density * currentZoneArea);
+            try {
+                // 1. Obtém a população para o raio limitado
+                const popData = await getWorldPopPopulation(lat, lon, queryRadiusKm); 
                 
-                const casualtiesInZone = Math.round(estimatedPopInZone * zone.mortality);
-                totalEstimatedCasualties += casualtiesInZone;
+                totalPopInZone = popData.population; 
+                populationSource = popData.source;
+
+                // 2. Cálculo das casualidades
+
+                const zoneMortality = [
+                    { radius: zones.totalDevastation, mortality: 1.0 },
+                    { radius: zones.severeDestruction, mortality: 0.7 },
+                    { radius: zones.moderateDamage, mortality: 0.3 }
+                ];
                 
-                if (popData.nearestCity) nearestCity = popData.nearestCity;
-                if (popData.source && popData.source !== 'GeoNames (Área)') populationSource = popData.source;
+                const totalAreaKm2 = Math.PI * totalRadius * totalRadius; 
+                let avgDensity = 0;
+
+                if (totalPopInZone > 0 && queryRadiusKm > 0) {
+                    const queryAreaKm2 = Math.PI * queryRadiusKm * queryRadiusKm;
+                    avgDensity = totalPopInZone / queryAreaKm2;
+                    
+                    populationSource = `${popData.source} (Raio Consultado: ${queryRadiusKm.toFixed(0)} km)`;
+                } else {
+                     avgDensity = 50; 
+                     populationSource = `${popData.source} - População 0 / Densidade base`;
+                }
                 
-                previousRadius = areaRadius;
-            }
-            
-            // Limite máximo realista (prevenção de números excessivos por erro de densidade)
-            totalEstimatedCasualties = Math.min(totalEstimatedCasualties, 10000000); 
-            
-            if (totalEstimatedCasualties === 0 && nearestCity) {
-                 populationSource = `GeoNames (${nearestCity}) - População 0 / Densidade baixa`;
+                let previousRadius = 0;
+                
+                for (const zone of zoneMortality) {
+                    const areaRadius = zone.radius; 
+                    const totalCurrentArea = Math.PI * areaRadius * areaRadius;
+                    const previousAreaKm2 = Math.PI * previousRadius * previousRadius;
+                    const currentZoneArea = totalCurrentArea - previousAreaKm2;
+                    const estimatedPopInZone = Math.round(avgDensity * currentZoneArea);
+                    const casualtiesInZone = Math.round(estimatedPopInZone * zone.mortality);
+                    totalEstimatedCasualties += casualtiesInZone;
+                    previousRadius = areaRadius;
+                }
+                
+                // CORREÇÃO FINAL: Limita o número de vítimas à população total encontrada pelo WorldPop
+                // para evitar que o número de mortes extrapoladas seja maior que a população real amostrada.
+                if (totalPopInZone > 0) {
+                     totalEstimatedCasualties = Math.min(totalEstimatedCasualties, totalPopInZone);
+                }
+
+                // Limite global como teto absoluto.
+                totalEstimatedCasualties = Math.min(totalEstimatedCasualties, 100000000); 
+                
+            } catch (error) {
+                console.warn(`Simulação: Falha ao obter dados WorldPop: ${error.message}`);
+                populationSource = `Falha na consulta WorldPop: ${error.message.substring(0, 50)}...`;
+                totalEstimatedCasualties = 0;
             }
         }
         
@@ -271,10 +317,8 @@ class AsteroidCalculator {
     }
 
     calculate() {
-        // Cálculo inicial para lista de asteroides
-        let lat = (Math.random() * 180) - 90; 
+        let lat = (Math.random() * 160) - 80;
         let lon = (Math.random() * 360) - 180; 
-        
         const energy = this.calculateImpactEnergy();
 
         return {
@@ -292,8 +336,6 @@ class AsteroidCalculator {
         };
     }
 }
-
-// --- Funções de Inicialização e Renderização ---
 
 function initMap() {
     map = L.map('worldMap', { center: [20, 0], zoom: 2, minZoom: 2, maxZoom: 10 });
@@ -351,7 +393,6 @@ function renderAsteroidList(data) {
         </div>
     `).join("");
     
-    // Mantém o cartão selecionado visualmente se houver um
     if (selectedAsteroid) {
         const card = document.querySelector(`[data-id="${selectedAsteroid.name}"]`);
         if (card) card.classList.add('selected');
@@ -379,22 +420,14 @@ function setupFilters() {
 function applyFilters() {
     const name = document.getElementById('filterName').value.toLowerCase();
     const risk = document.getElementById('filterRisk').value;
-    const maxDistance = parseFloat(document.getElementById('filterDistance').value) * 1000; // Converte para km
+    const maxDistance = parseFloat(document.getElementById('filterDistance').value) * 1000;
     const minDiameter = parseFloat(document.getElementById('filterDiameter').value);
 
     const filtered = asteroidsData.filter(a => {
-        // Filtro por nome
         if (name && !a.name.toLowerCase().includes(name)) return false;
-        
-        // Filtro por risco
         if (risk && a.risk !== risk) return false;
-        
-        // Filtro por distância máxima
         if (!isNaN(maxDistance) && a.distance > maxDistance) return false;
-        
-        // Filtro por diâmetro mínimo
         if (!isNaN(minDiameter) && a.diameter < minDiameter) return false;
-        
         return true;
     });
 
@@ -411,7 +444,6 @@ function setupSimulator() {
 
     map.on('click', async (e) => {
         const mode = document.querySelector('input[name="selectionMode"]:checked').value;
-
         if (mode === 'click' && selectedAsteroid) {
             await simulateImpact(e.latlng.lat, e.latlng.lng);
         } else if (mode === 'click' && !selectedAsteroid) {
@@ -439,28 +471,22 @@ function setupSimulator() {
     document.getElementById('asteroidList').addEventListener('click', (e) => {
         const card = e.target.closest('.asteroid-card');
         if (card) {
-            // Remove seleção anterior
             document.querySelectorAll('.asteroid-card').forEach(c => c.classList.remove('selected'));
             card.classList.add('selected');
 
-            // Seleciona o asteroide
             const index = card.getAttribute('data-index');
             selectedAsteroid = asteroidsData[parseInt(index)];
             
-            // Atualiza o painel de seleção e habilita o botão
             document.getElementById('currentAsteroidName').textContent = selectedAsteroid.name;
             document.getElementById('selectedAsteroidInfo').style.display = 'block';
             document.getElementById('simulateBtn').disabled = false;
             
-            // Move o mapa para as coordenadas de impacto iniciais do asteroide
             const coords = selectedAsteroid.impactCoords;
             map.setView([coords.lat, coords.lon], 4);
             
-            // Limpa resultados anteriores
             document.getElementById('simulationResult').style.display = 'none';
             document.getElementById('simulationResult').innerHTML = '';
             
-            // Atualiza mitigações iniciais
             updateMitigationPanel(selectedAsteroid);
         }
     });
@@ -479,7 +505,7 @@ function updateMitigationPanel(asteroid) {
 }
 
 async function simulateImpact(lat, lon) {
-    showLoading('Analisando localização, população e calculando impacto...');
+    showLoading('Analisando localização e calculando impacto. Preparando consulta WorldPop...');
     
     if (simulationMarker) map.removeLayer(simulationMarker);
     simulationZones.forEach(z => map.removeLayer(z));
@@ -490,120 +516,125 @@ async function simulateImpact(lat, lon) {
     
     const calc = new AsteroidCalculator(fullNeoData, fullApproachData);
     
-    const sim = await calc.simulateImpactAt(lat, lon);
-    hideLoading();
-    
-    // [Renderização do Marcador e Círculos de Dano]
-
-    // Remove tooltips ou popups de simulações anteriores
-    map.eachLayer(layer => {
-        if (layer.options.permanent) map.removeLayer(layer);
-    });
-
-    const icon = L.divIcon({
-        className: 'asteroid-marker',
-        html: '<div style="width: 40px; height: 40px; background: radial-gradient(circle, #ff0000, #8b0000); border: 4px solid #fbbf24; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px; animation: pulse 1s infinite;">💥</div>',
-        iconSize: [40, 40],
-        iconAnchor: [20, 20]
-    });
-    
-    simulationMarker = L.marker([lat, lon], { icon }).addTo(map);
-    
-    if (sim.nearestCity) {
-        L.tooltip({ permanent: true, direction: 'right', offset: [15, 0], className: 'map-tooltip' })
-            .setContent(`Alvo: ${sim.nearestCity || sim.location}`)
-            .setLatLng([lat, lon])
-            .addTo(map);
-    }
-
-    [
-        { r: sim.zones.totalDevastation, c: '#8b0000', label: 'Destruição Total (100% mortalidade)' },
-        { r: sim.zones.severeDestruction, c: '#ff0000', label: 'Destruição Severa (~70% mortalidade)' },
-        { r: sim.zones.moderateDamage, c: '#ff6600', label: 'Dano Moderado (~30% mortalidade)' },
-        { r: sim.zones.lightEffects, c: '#ffaa00', label: 'Efeitos Leves' }
-    ].forEach(z => {
-        const circle = L.circle([lat, lon], { 
-            radius: z.r * 1000, 
-            color: z.c, 
-            fillOpacity: 0.15, 
-            weight: 2 
-        }).bindPopup(`<b>${z.label}</b><br>Raio: ${z.r.toFixed(1)} km`).addTo(map);
-        simulationZones.push(circle);
-    });
-    
-    map.setView([lat, lon], 6);
-    
-    // [Renderização dos Resultados da Simulação]
-
-    const locationIcon = sim.isOcean ? '🌊' : '🏙️';
-    const locationTypeText = sim.isOcean ? 'OCEANO' : 'TERRA FIRME';
-    const casualtyText = sim.isOcean 
-        ? 'Sem vítimas diretas (Risco de Tsunami)' 
-        : sim.estimatedCasualties > 0 
-        ? `${sim.estimatedCasualties.toLocaleString('pt-BR')} vítimas estimadas` 
-        : 'População não detectada / Densidade baixa';
-
-    const tsunamiDetails = sim.tsunamiRisk ? `
-        <div class="stat-item" style="color: #63b3ed;">
-            <span class="stat-label">🌊 Risco de Tsunami:</span>
-            <span class="stat-value">Onda de ${sim.tsunamiRisk.height}m - Alcance de ${sim.tsunamiRisk.range.toFixed(0)} km</span>
-        </div>` : '';
+    try {
+        const sim = await calc.simulateImpactAt(lat, lon);
+        hideLoading();
         
-    const populationSourceText = sim.isOcean ? '' : `<br>Fonte População: ${sim.populationSource}`;
+        map.eachLayer(layer => {
+            if (layer.options.permanent) map.removeLayer(layer);
+        });
 
-    document.getElementById('simulationResult').style.display = 'block';
-    document.getElementById('simulationResult').innerHTML = `
-        <div style="border-top: 2px solid #fbbf24; padding-top: 15px;">
-            <h3 style="color: #ef4444; margin-bottom: 10px;">ANÁLISE DE IMPACTO</h3>
-            <div style="font-size: 13px; color: #cbd5e0; line-height: 1.8;">
-                <div style="background: rgba(59, 130, 246, 0.1); border: 1px solid #3b82f6; padding: 8px; border-radius: 5px; margin-bottom: 10px;">
-                    <strong>Asteroide:</strong> ${selectedAsteroid.name} (${selectedAsteroid.diameter.toFixed(2)} km)<br>
-                    <strong>Energia do Impacto:</strong> ${sim.energy.toFixed(1)} megatons (${sim.comparison})${populationSourceText}<br>
-                </div>
+        const icon = L.divIcon({
+            className: 'asteroid-marker',
+            html: '<div style="width: 40px; height: 40px; background: radial-gradient(circle, #ff0000, #8b0000); border: 4px solid #fbbf24; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px; animation: pulse 1s infinite;">💥</div>',
+            iconSize: [40, 40],
+            iconAnchor: [20, 20]
+        });
+        
+        simulationMarker = L.marker([lat, lon], { icon }).addTo(map);
+        
+        if (sim.nearestCity) {
+            L.tooltip({ permanent: true, direction: 'right', offset: [15, 0], className: 'map-tooltip' })
+                .setContent(`Alvo: ${sim.nearestCity || sim.location}`)
+                .setLatLng([lat, lon])
+                .addTo(map);
+        }
 
-                <div class="stats" style="margin-top: 10px; border-color: #ef4444;">
-                    <div class="stat-item">
-                        <span class="stat-label">${locationIcon} Local Próximo:</span>
-                        <span class="stat-value">${sim.nearestCity || sim.location} (${locationTypeText})</span>
+        [
+            { r: sim.zones.totalDevastation, c: '#8b0000', label: 'Destruição Total (100% mortalidade)' },
+            { r: sim.zones.severeDestruction, c: '#ff0000', label: 'Destruição Severa (~70% mortalidade)' },
+            { r: sim.zones.moderateDamage, c: '#ff6600', label: 'Dano Moderado (~30% mortalidade)' },
+            { r: sim.zones.lightEffects, c: '#ffaa00', label: 'Efeitos Leves' }
+        ].forEach(z => {
+            const circle = L.circle([lat, lon], { 
+                radius: z.r * 1000, 
+                color: z.c, 
+                fillOpacity: 0.15, 
+                weight: 2 
+            }).bindPopup(`<b>${z.label}</b><br>Raio: ${z.r.toFixed(1)} km`).addTo(map);
+            simulationZones.push(circle);
+        });
+        
+        map.setView([lat, lon], 6);
+        
+        const locationIcon = sim.isOcean ? '🌊' : '🏙️';
+        const locationTypeText = sim.isOcean ? 'OCEANO' : 'TERRA FIRME';
+        
+        let casualtyText = '';
+        if (sim.isOcean) {
+             casualtyText = 'Sem vítimas diretas (Risco de Tsunami)';
+        } else if (sim.populationSource.includes('Falha na consulta WorldPop')) {
+             casualtyText = sim.populationSource.replace('Falha na consulta WorldPop: ', 'Falha ao obter dados WorldPop: ');
+        } else if (sim.estimatedCasualties > 0) {
+             casualtyText = `${sim.estimatedCasualties.toLocaleString('pt-BR')} vítimas estimadas`;
+        } else {
+             casualtyText = 'População 0 detectada (WorldPop)';
+        }
+
+        const tsunamiDetails = sim.tsunamiRisk ? `
+            <div class="stat-item" style="color: #63b3ed;">
+                <span class="stat-label">🌊 Risco de Tsunami:</span>
+                <span class="stat-value">Onda de ${sim.tsunamiRisk.height}m - Alcance de ${sim.tsunamiRisk.range.toFixed(0)} km</span>
+            </div>` : '';
+            
+        const populationSourceText = sim.isOcean ? '' : `<br>Fonte População: ${sim.populationSource}`;
+
+        document.getElementById('simulationResult').style.display = 'block';
+        document.getElementById('simulationResult').innerHTML = `
+            <div style="border-top: 2px solid #fbbf24; padding-top: 15px;">
+                <h3 style="color: #ef4444; margin-bottom: 10px;">ANÁLISE DE IMPACTO</h3>
+                <div style="font-size: 13px; color: #cbd5e0; line-height: 1.8;">
+                    <div style="background: rgba(59, 130, 246, 0.1); border: 1px solid #3b82f6; padding: 8px; border-radius: 5px; margin-bottom: 10px;">
+                        <strong>Asteroide:</strong> ${selectedAsteroid.name} (${selectedAsteroid.diameter.toFixed(2)} km)<br>
+                        <strong>Energia do Impacto:</strong> ${sim.energy.toFixed(1)} megatons (${sim.comparison})${populationSourceText}<br>
                     </div>
-                    <div class="stat-item">
-                        <span class="stat-label">Diâmetro da Cratera:</span>
-                        <span class="stat-value">${(sim.craterRadius * 2).toFixed(2)} km</span>
-                    </div>
-                    <div class="stat-item">
-                        <span class="stat-label">Magnitude Sísmica:</span>
-                        <span class="stat-value">M${sim.earthquakeMagnitude}</span>
-                    </div>
-                    <div class="stat-item">
-                        <span class="stat-label">💀 Vítimas Estimadas (Zonas):</span>
-                        <span class="stat-value" style="color: ${sim.estimatedCasualties > 0 ? '#ef4444' : '#10b981'};">${casualtyText}</span>
-                    </div>
-                    ${tsunamiDetails}
-                    <div style="margin-top: 10px; padding-top: 8px; border-top: 1px dashed #4a5568;">
-                        <strong style="color: #9ca3af;">Efeitos Climáticos:</strong> ${sim.climateEffects.length > 0 ? sim.climateEffects.join(', ') : 'Nenhum significativo'}
+
+                    <div class="stats" style="margin-top: 10px; border-color: #ef4444;">
+                        <div class="stat-item">
+                            <span class="stat-label">${locationIcon} Local Próximo:</span>
+                            <span class="stat-value">${sim.nearestCity || sim.location} (${locationTypeText})</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Diâmetro da Cratera:</span>
+                            <span class="stat-value">${(sim.craterRadius * 2).toFixed(2)} km</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Magnitude Sísmica:</span>
+                            <span class="stat-value">M${sim.earthquakeMagnitude}</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">💀 Vítimas Estimadas (Zonas):</span>
+                            <span class="stat-value" style="color: ${sim.estimatedCasualties > 0 ? '#ef4444' : '#10b981'};">${casualtyText}</span>
+                        </div>
+                        ${tsunamiDetails}
+                        <div style="margin-top: 10px; padding-top: 8px; border-top: 1px dashed #4a5568;">
+                            <strong style="color: #9ca3af;">Efeitos Climáticos:</strong> ${sim.climateEffects.length > 0 ? sim.climateEffects.join(', ') : 'Nenhum significativo'}
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
-    `;
-    
-    // Atualiza o painel de mitigações com a nova energia e diâmetro
-    document.getElementById('mitigation-deflection').textContent = sim.mitigation.deflection;
-    document.getElementById('mitigation-destruction').textContent = sim.mitigation.destruction;
-    document.getElementById('mitigation-evac').textContent = sim.mitigation.evacuationRadius;
-    document.getElementById('mitigationMsg').style.display = 'none';
-    document.getElementById('mitigationDetails').style.display = 'block';
-}
+        `;
+        
+        document.getElementById('mitigation-deflection').textContent = sim.mitigation.deflection;
+        document.getElementById('mitigation-destruction').textContent = sim.mitigation.destruction;
+        document.getElementById('mitigation-evac').textContent = sim.mitigation.evacuationRadius;
+        document.getElementById('mitigationMsg').style.display = 'none';
+        document.getElementById('mitigationDetails').style.display = 'block';
 
-// --- Inicialização ---
+    } catch (error) {
+        hideLoading();
+        console.error('Erro na Simulação:', error);
+        alert(`Falha na simulação: ${error.message}. Por favor, tente outro local ou asteroide.`);
+        document.getElementById('simulationResult').style.display = 'block';
+        document.getElementById('simulationResult').innerHTML = `<div style="color: #ef4444; padding: 15px; border: 1px solid #ef4444; border-radius: 5px;">ERRO: ${error.message}</div>`;
+    }
+}
 
 document.addEventListener('DOMContentLoaded', async () => {
     initMap();
     showLoading('Carregando dados de asteroides da NASA...');
     
     const initialData = await loadNASAData(); 
-    
-    // Adiciona o índice original para permitir a filtragem e a seleção correta
     asteroidsData = initialData.map((a, i) => ({ ...a, _originalIndex: i }));
     
     hideLoading();
