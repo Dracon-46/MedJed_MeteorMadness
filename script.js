@@ -367,7 +367,7 @@ async function loadNASAData() {
         }
         return all.slice(0, 50); 
     } catch (err) {
-        console.error("Erro ao carregar dados da NASA:", err);
+        console.error("Erro ao carregar dados:", err);
         return [];
     }
 }
@@ -480,9 +480,15 @@ function setupSimulator() {
             document.getElementById('currentAsteroidName').textContent = selectedAsteroid.name;
             document.getElementById('selectedAsteroidInfo').style.display = 'block';
             document.getElementById('simulateBtn').disabled = false;
+
+                        map.setView([20, 0], 2);
             
-            const coords = selectedAsteroid.impactCoords;
-            map.setView([coords.lat, coords.lon], 4);
+            if (simulationMarker) map.removeLayer(simulationMarker);
+            simulationZones.forEach(z => map.removeLayer(z));
+            simulationZones = [];
+            
+            //const coords = selectedAsteroid.impactCoords;
+            //map.setView([coords.lat, coords.lon], 4);
             
             document.getElementById('simulationResult').style.display = 'none';
             document.getElementById('simulationResult').innerHTML = '';
@@ -535,16 +541,15 @@ async function simulateImpact(lat, lon) {
         
         if (sim.nearestCity) {
             L.tooltip({ permanent: true, direction: 'right', offset: [15, 0], className: 'map-tooltip' })
-                .setContent(`Alvo: ${sim.nearestCity || sim.location}`)
                 .setLatLng([lat, lon])
                 .addTo(map);
         }
 
         [
-            { r: sim.zones.totalDevastation, c: '#8b0000', label: 'Destruição Total (100% mortalidade)' },
-            { r: sim.zones.severeDestruction, c: '#ff0000', label: 'Destruição Severa (~70% mortalidade)' },
+            { r: sim.zones.lightEffects, c: '#ffaa00', label: 'Efeitos Leves' }, // Maior raio
             { r: sim.zones.moderateDamage, c: '#ff6600', label: 'Dano Moderado (~30% mortalidade)' },
-            { r: sim.zones.lightEffects, c: '#ffaa00', label: 'Efeitos Leves' }
+            { r: sim.zones.severeDestruction, c: '#ff0000', label: 'Destruição Severa (~70% mortalidade)' },
+            { r: sim.zones.totalDevastation, c: '#8b0000', label: 'Destruição Total (100% mortalidade)' }, // Menor raio, fica no topo
         ].forEach(z => {
             const circle = L.circle([lat, lon], { 
                 radius: z.r * 1000, 
@@ -563,6 +568,7 @@ async function simulateImpact(lat, lon) {
         let casualtyText = '';
         if (sim.isOcean) {
              casualtyText = 'Sem vítimas diretas (Risco de Tsunami)';
+             sim.isOcean = false; // Reseta a flag de oceano
         } else if (sim.populationSource.includes('Falha na consulta WorldPop')) {
              casualtyText = sim.populationSource.replace('Falha na consulta WorldPop: ', 'Falha ao obter dados WorldPop: ');
         } else if (sim.estimatedCasualties > 0) {
@@ -632,7 +638,7 @@ async function simulateImpact(lat, lon) {
 
 document.addEventListener('DOMContentLoaded', async () => {
     initMap();
-    showLoading('Carregando dados de asteroides da NASA...');
+    showLoading('Carregando dados de asteroides...');
     
     const initialData = await loadNASAData(); 
     asteroidsData = initialData.map((a, i) => ({ ...a, _originalIndex: i }));
@@ -640,7 +646,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     hideLoading();
 
     if (asteroidsData.length === 0) {
-        document.getElementById("asteroidList").innerHTML = `<div class="loading" style="color:#ef4444;">Falha ao carregar dados da NASA. Verifique a chave da API.</div>`;
+        document.getElementById("asteroidList").innerHTML = `<div class="loading" style="color:#ef4444;">Falha ao carregar dados. Verifique a chave da API.</div>`;
         document.getElementById('simulateBtn').disabled = true;
         return;
     }
